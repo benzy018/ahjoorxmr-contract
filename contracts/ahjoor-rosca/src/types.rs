@@ -156,6 +156,9 @@ pub enum ProposalType {
     HardshipReduction = 11,  // One-round contribution reduction covered by the emergency reserve
     /// Vote of no confidence: when passed, `target_member` replaces the admin.
     NoConfidence = 12,
+    /// Change the per-member contribution amount from the next cycle on.
+    /// `execution_data` carries the new amount.
+    ChangeContributionAmount = 13,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -544,6 +547,20 @@ pub enum DataKey5 {
     // ── Payout Splits (#1123) ─────────────────────────────────────────────────
     /// Vec<(Address, u32)> — member → payout recipients and basis points.
     PayoutSplits(Address),
+
+    // ── Governance-Driven Contribution Amount ─────────────────────────────────
+    /// PendingContributionChange — approved amount waiting for the next cycle.
+    PendingContributionChange,
+}
+
+/// A governance-approved contribution amount that takes effect at the first
+/// round of `effective_cycle`. The current cycle is never altered.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PendingContributionChange {
+    pub amount: i128,
+    pub effective_cycle: u32,
+    pub proposal_id: u32,
 }
 
 // ── Contribution Streak Bonus ─────────────────────────────────────────────────

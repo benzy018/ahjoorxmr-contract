@@ -12,7 +12,6 @@ pub mod pre_approved_spending;
 pub mod pre_approved_spending_impl;
 pub mod customer_spend;
 pub mod fulfilment;
-pub mod security_deposit;
 pub mod withdrawal_policy;
 
 /// Maximum length (bytes) for the optional payment reference string.
@@ -1351,6 +1350,20 @@ pub enum DataKey3 {
     PaymentRequestPayment(u32),
     /// Persistent: per-merchant sales-tax configuration (tax_bps + tax_address).
     MerchantTax(Address),
+
+    // --- Feature: Group Split Bills ---
+    /// Instance: counter for split bill IDs.
+    SplitBillCounter,
+    /// Persistent: split bill header keyed by bill ID.
+    SplitBill(u32),
+    /// Persistent: participant shares for a split bill.
+    SplitBillShares(u32),
+
+    // --- Feature: Subscription Seats ---
+    /// Persistent: active seat addresses for a plan.
+    PlanSeats(u32),
+    /// Persistent: seats queued for removal at the next billing period.
+    PlanPendingSeatRemoval(u32),
 }
 
 /// Per-merchant sales-tax configuration.

@@ -362,8 +362,8 @@ fn test_clear_flag_requires_cooling_off_status() {
         .unwrap_err()
         .unwrap();
     
-    // This should fail because the escrow isn't in CoolingOff state yet
-    assert!(err != 0); // Verify some error occurred
+    // This should fail because there is no resolution flag to clear
+    assert_eq!(err, EscrowErrorExt::NoFlagToClear.into());
 }
 
 /// Test: Cooling-off window with zero duration still requires explicit finalization
@@ -416,16 +416,22 @@ fn test_non_party_cannot_flag_resolution() {
         .unwrap();
     
     // Should fail because arbiter is not a party to the escrow
-    assert!(err != 0);
-    
+    assert_eq!(
+        err,
+        EscrowErrorExt::OnlyBuyerOrSellerCanFlagResolutionError.into()
+    );
+
     // Random third party tries to flag
     let random = Address::generate(&env);
     let err = client
         .try_flag_resolution_error(&random, &escrow_id, &reason)
         .unwrap_err()
         .unwrap();
-    
-    assert!(err != 0);
+
+    assert_eq!(
+        err,
+        EscrowErrorExt::OnlyBuyerOrSellerCanFlagResolutionError.into()
+    );
 }
 
 /// Test: Flagged resolution can be finalized after admin clearance, regardless of time

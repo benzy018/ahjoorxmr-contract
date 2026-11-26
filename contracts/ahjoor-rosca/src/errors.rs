@@ -349,6 +349,18 @@ pub enum ExtError3 {
     InvalidNoConfidenceNominee = 183,
     /// The outgoing admin may not vote on a NoConfidence proposal.
     AdminCannotVoteOnNoConfidence = 184,
+    // ── Governance-Driven Contribution Amount ────────────────────────────────
+    /// The contribution amount must be positive and fit the group's member count.
+    InvalidContributionAmount = 185,
+    /// `amount * members` overflows i128.
+    ContributionAmountOverflow = 186,
+    /// A contribution amount change is already scheduled for the next cycle.
+    ContributionAmountChangePending = 187,
+    // ── Payout Splits ────────────────────────────────────────────────────────
+    /// Payout splits must cover 1..=10 distinct recipients and total 10_000 bps.
+    InvalidPayoutSplit = 188,
+    /// A member cannot have both payout splits and a payout beneficiary.
+    PayoutSplitsBeneficiaryConflict = 189,
 }
 
 /// Extension error codes 183+ — overflow from ExtError3 (50-variant limit).

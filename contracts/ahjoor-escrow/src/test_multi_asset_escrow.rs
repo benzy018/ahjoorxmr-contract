@@ -44,14 +44,19 @@ fn setup<'a>() -> Setup<'a> {
 
     client.initialize(&admin);
 
+    let token_a_client = TokenClient::new(&env, &token_a);
+    let token_b_client = TokenClient::new(&env, &token_b);
+    let token_a_admin = TokenAdminClient::new(&env, &token_a);
+    let token_b_admin = TokenAdminClient::new(&env, &token_b);
+
     Setup {
         env,
         client,
-        token_a_client: TokenClient::new(&env, &token_a),
-        token_a_admin: TokenAdminClient::new(&env, &token_a),
+        token_a_client,
+        token_a_admin,
         token_a,
-        token_b_client: TokenClient::new(&env, &token_b),
-        token_b_admin: TokenAdminClient::new(&env, &token_b),
+        token_b_client,
+        token_b_admin,
         token_b,
     }
 }

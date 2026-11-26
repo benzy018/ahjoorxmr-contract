@@ -4657,6 +4657,13 @@ impl AhjoorContract {
                     panic_with_error!(&env, ExtError3::InvalidNoConfidenceNominee);
                 }
             }
+            ProposalType::ChangeContributionAmount => {
+                let amount = match execution_data {
+                    Some(amount) => amount,
+                    None => panic_with_error!(&env, ExtError3::InvalidContributionAmount),
+                };
+                contribution_amount::validate(&env, amount);
+            }
             _ => {}
         }
 
@@ -13476,6 +13483,34 @@ impl AhjoorContract {
             proposer,
             voting_duration,
             Some(extra_seconds as i128),
+        )
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // ── Governance-Driven Contribution Amount ─────────────────────────────────
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Member: open a `ChangeContributionAmount` proposal. The new amount is
+    /// validated immediately (positive, no overflow, within the token limit)
+    /// and, once passed, applies from the next cycle's first round. Returns the
+    /// proposal id.
+    pub fn propose_contribution_change(
+        env: Env,
+        proposer: Address,
+        new_amount: i128,
+        voting_duration: u64,
+    ) -> u32 {
+        internals::check_not_paused(&env);
+        proposer.require_auth();
+        contribution_amount::validate(&env, new_amount);
+        Self::create_proposal_internal(
+            &env,
+            proposer.clone(),
+            ProposalType::ChangeContributionAmount,
+            String::from_str(&env, "Change contribution amount"),
+            proposer,
+            voting_duration,
+            Some(new_amount),
         )
     }
 

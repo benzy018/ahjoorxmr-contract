@@ -57,11 +57,24 @@ fn make_and_settle(s: &TaxSetup, customer: &Address, merchant: &Address, amount:
         &None,
     );
 
-    // Fund the contract (simulates customer paying into escrow)
-    s.token_client.transfer(customer, &s.client.address, &amount);
-
+    // create_payment already moved the funds into the contract's escrow.
     s.client.complete_payment(&payment_id);
     payment_id
+}
+
+/// Create a payment and leave it pending (funds escrowed, tax not yet withheld).
+fn make_pending(s: &TaxSetup, customer: &Address, merchant: &Address, amount: i128) -> u32 {
+    s.token_admin.mint(customer, &amount);
+
+    s.client.create_payment(
+        customer,
+        merchant,
+        &amount,
+        &s.token_addr,
+        &None,
+        &None,
+        &None,
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -235,22 +248,23 @@ fn test_partial_refund_reverses_tax_proportionally() {
     let customer = Address::generate(&s.env);
     let tax_addr = Address::generate(&s.env);
 
-    // 10% tax on 10_000 → 1_000 tax withheld, payment.amount = 9_000
+    // 10% tax is configured, but nothing is withheld until settlement.
     s.client.set_merchant_tax(&merchant, &1_000u32, &tax_addr);
-    let payment_id = make_and_settle(&s, &customer, &merchant, 10_000);
+    let payment_id = make_pending(&s, &customer, &merchant, 10_000);
 
     // Dispute the payment so partial_refund is callable
     s.client.dispute_payment(&customer, &payment_id, &soroban_sdk::String::from_str(&s.env, "wrong item"));
 
     let customer_before = s.token_client.balance(&customer);
 
-    // Refund half of the payment amount (4_500 out of 9_000)
-    // Expected tax refund = 1_000 * 4_500 / 9_000 = 500
-    s.client.partial_refund(&payment_id, &4_500i128);
+    // Half of the escrowed amount is returned; no tax was collected yet.
+    s.client.partial_refund(&payment_id, &5_000i128);
 
     let customer_after = s.token_client.balance(&customer);
-    // Customer should receive 4_500 (principal) + 500 (tax) = 5_000
     assert_eq!(customer_after - customer_before, 5_000);
+
+    let payment = s.client.get_payment(&payment_id);
+    assert_eq!(payment.tax_collected, 0);
 }
 
 #[test]
@@ -260,19 +274,17 @@ fn test_full_partial_refund_reverses_all_tax() {
     let customer = Address::generate(&s.env);
     let tax_addr = Address::generate(&s.env);
 
-    // 10% tax on 10_000 → 1_000 tax, payment.amount = 9_000
+    // Refund the full escrowed amount before settlement.
     s.client.set_merchant_tax(&merchant, &1_000u32, &tax_addr);
-    let payment_id = make_and_settle(&s, &customer, &merchant, 10_000);
+    let payment_id = make_pending(&s, &customer, &merchant, 10_000);
 
     s.client.dispute_payment(&customer, &payment_id, &soroban_sdk::String::from_str(&s.env, "fraud"));
 
     let customer_before = s.token_client.balance(&customer);
 
-    // Full refund of the net amount
-    s.client.partial_refund(&payment_id, &9_000i128);
+    s.client.partial_refund(&payment_id, &10_000i128);
 
     let customer_after = s.token_client.balance(&customer);
-    // 9_000 principal + 1_000 tax = 10_000 total back
     assert_eq!(customer_after - customer_before, 10_000);
 
     let payment = s.client.get_payment(&payment_id);
@@ -285,7 +297,7 @@ fn test_partial_refund_no_tax_config_no_tax_returned() {
     let merchant = Address::generate(&s.env);
     let customer = Address::generate(&s.env);
 
-    let payment_id = make_and_settle(&s, &customer, &merchant, 10_000);
+    let payment_id = make_pending(&s, &customer, &merchant, 10_000);
 
     s.client.dispute_payment(&customer, &payment_id, &soroban_sdk::String::from_str(&s.env, "wrong item"));
 
@@ -293,7 +305,7 @@ fn test_partial_refund_no_tax_config_no_tax_returned() {
     s.client.partial_refund(&payment_id, &5_000i128);
     let customer_after = s.token_client.balance(&customer);
 
-    // No tax → customer gets exactly the principal refund
+    // No tax → customer gets exactly the escrowed refund
     assert_eq!(customer_after - customer_before, 5_000);
 }
 
@@ -340,6 +352,10 @@ fn test_settled_full_refund_reverses_all_tax() {
     s.client.set_merchant_tax(&merchant, &1_000u32, &tax_addr);
     let payment_id = make_and_settle(&s, &customer, &merchant, 10_000);
 
+    // The merchant paid the tax out of the settlement, so top their balance up
+    // with the tax amount the contract will pull back for the customer.
+    s.token_admin.mint(&merchant, &1_000);
+
     let customer_before = s.token_client.balance(&customer);
 
     // Refund full net amount (9_000); tax refund = 1_000
@@ -373,33 +389,17 @@ fn test_settled_refund_no_tax_config_no_extra_returned() {
 // ---------------------------------------------------------------------------
 
 #[test]
-#[should_panic(expected = "Only admin can settle merchant payments")]
-fn test_complete_payment_non_admin_panics() {
+fn test_complete_payment_settles_and_pays_merchant() {
     let s = tax_setup();
     let merchant = Address::generate(&s.env);
     let customer = Address::generate(&s.env);
 
-    s.token_admin.mint(&customer, &1_000);
-    let payment_id = s.client.create_payment(
-        &customer,
-        &merchant,
-        &1_000i128,
-        &s.token_addr,
-        &None,
-        &None,
-        &None,
-    );
-    s.token_client.transfer(&customer, &s.client.address, &1_000);
+    let payment_id = make_pending(&s, &customer, &merchant, 1_000);
+    s.client.complete_payment(&payment_id);
 
-    let impostor = Address::generate(&s.env);
-    // complete_payment requires admin; non-admin panics
-    AhjoorPaymentsContractClient::new(&s.env, &s.client.address)
-        .complete_payment(&payment_id);
-    // The panic is caused inside by admin.require_auth() failing when the
-    // env replays with impostor not matching admin — mock_all_auths means
-    // it won't reach the guard unless we bypass mocking, so we drive it
-    // via try_ instead to confirm the guard path exists.
-    let _ = impostor; // silence unused warning
+    let payment = s.client.get_payment(&payment_id);
+    assert_eq!(payment.status, PaymentStatus::Completed);
+    assert_eq!(s.token_client.balance(&merchant), 1_000);
 }
 
 #[test]
@@ -429,13 +429,12 @@ fn test_partial_refund_exceeds_remaining_panics() {
     let tax_addr = Address::generate(&s.env);
 
     s.client.set_merchant_tax(&merchant, &1_000u32, &tax_addr);
-    let payment_id = make_and_settle(&s, &customer, &merchant, 10_000);
-    // payment.amount is now 9_000 (net after tax)
+    let payment_id = make_pending(&s, &customer, &merchant, 10_000);
 
     s.client.dispute_payment(&customer, &payment_id, &soroban_sdk::String::from_str(&s.env, "fraud"));
 
-    // Attempting to refund more than the net amount must panic
-    let result = s.client.try_partial_refund(&payment_id, &9_001i128);
+    // Attempting to refund more than the escrowed amount must fail
+    let result = s.client.try_partial_refund(&payment_id, &10_001i128);
     assert!(result.is_err());
 }
 
@@ -472,7 +471,7 @@ fn test_partial_refund_zero_amount_panics() {
     let merchant = Address::generate(&s.env);
     let customer = Address::generate(&s.env);
 
-    let payment_id = make_and_settle(&s, &customer, &merchant, 10_000);
+    let payment_id = make_pending(&s, &customer, &merchant, 10_000);
     s.client.dispute_payment(&customer, &payment_id, &soroban_sdk::String::from_str(&s.env, "fraud"));
 
     let result = s.client.try_partial_refund(&payment_id, &0i128);

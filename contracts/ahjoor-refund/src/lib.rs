@@ -409,6 +409,23 @@ pub enum DataKey2 {
     SlaPenaltyBps,
     /// SLA penalty paid out for a refund.
     RefundSlaPenaltyPaid(u32),
+
+    // --- Feature: Refund Abuse Reputation Reporting ---
+    /// Address of the cross-contract reputation registry (absent = disabled).
+    ReputationRegistry,
+
+    // --- Feature: Fast-Lane Refunds ---
+    /// FastLaneCriteria — automatic approval criteria (absent = disabled).
+    FastLaneCriteria,
+    /// Per-merchant fast-lane cap: merchant → max auto-approved amount.
+    FastLaneMaxAmount(Address),
+
+    // --- Feature: Reserve Locks ---
+    /// Amount of a merchant's reserve locked by appeal / dispute flows.
+    MerchantReserveLocked(Address),
+    /// Amount of reserve withheld while an approved refund is locked,
+    /// keyed by refund id.
+    AppealLockedAmount(u32),
 }
 
 #[derive(Clone)]

@@ -391,6 +391,23 @@ pub enum EscrowErrorExt5 {
     CannotExtendDeadlineDuringDispute = 35,
     /// set_keeper_reward_bps: value exceeds the configured maximum.
     KeeperRewardBpsExceedsMaximum = 36,
+    // ── Multi-Asset Escrows ──────────────────────────────────────────────
+    /// The asset list for a multi-asset escrow must not be empty.
+    AssetListCannotBeEmpty = 37,
+    /// Every asset amount in a multi-asset escrow must be positive.
+    AssetAmountMustBePositive = 38,
+    /// A multi-asset escrow cannot list the same token twice.
+    DuplicateTokenInAssetList = 39,
+    /// The escrow exceeds the maximum number of supported assets.
+    TooManyAssetsInEscrow = 40,
+    /// The escrow has no multi-asset allocations to act on.
+    MultiAssetEscrowNotActive = 41,
+    /// Only the buyer or arbiter may release a multi-asset escrow.
+    OnlyBuyerOrArbiterCanReleaseMultiAssetEscrow = 42,
+    /// Only the buyer or arbiter may refund a multi-asset escrow.
+    OnlyBuyerOrArbiterCanRefundMultiAssetEscrow = 43,
+    /// The multi-asset refund deadline has not passed yet.
+    RefundNotYetAvailableBeforeDeadline = 44,
 }
 
 /// #977: Mutual settlement offer for a disputed escrow.
@@ -1026,6 +1043,17 @@ pub enum DataKey3 {
     /// address calls `auto_release_expired` on an expired escrow.
     /// 0 (default) disables the reward.
     KeeperRewardBps,
+
+    // --- Feature: Multi-Asset Escrows ---
+    /// MultiAssetEscrow — asset allocations held by an escrow (persistent).
+    MultiAssetEscrow(u32),
+    /// Instance: counter for multi-asset escrow IDs.
+    MultiAssetEscrowCounter,
+
+    // --- Feature: Resolution Flag Review ---
+    /// bool — an admin cleared the resolution flag, waiving the remaining
+    /// cooling-off window for this escrow (persistent).
+    ResolutionFlagCleared(u32),
 }
 
 /// A third party's pre-funded protocol fee for a specific escrow.
@@ -3585,8 +3613,12 @@ impl AhjoorEscrowContract {
             .get(&DataKey2::ResolutionCoolingOffSeconds)
             .unwrap_or(0);
 
+        // An admin-reviewed clearance waives the remaining cooling-off window.
+        let cleared_key = DataKey3::ResolutionFlagCleared(escrow_id);
+        let cleared = env.storage().persistent().has(&cleared_key);
+
         let now = env.ledger().timestamp();
-        if now <= verdict.recorded_at + cooling_off_seconds {
+        if !cleared && now <= verdict.recorded_at + cooling_off_seconds {
             panic_with_error!(&env, EscrowErrorExt::CoolingOffWindowHasNotElapsed);
         }
 
@@ -3627,6 +3659,15 @@ impl AhjoorEscrowContract {
         }
 
         env.storage().persistent().remove(&DataKey2::ResolutionFlag(escrow_id));
+        // Record the review so `finalize_resolution` may proceed without
+        // waiting out the rest of the cooling-off window.
+        let cleared_key = DataKey3::ResolutionFlagCleared(escrow_id);
+        env.storage().persistent().set(&cleared_key, &true);
+        env.storage().persistent().extend_ttl(
+            &cleared_key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
 
         env.storage()
             .instance()
@@ -4022,7 +4063,7 @@ impl AhjoorEscrowContract {
         // Check if deadline has passed
         let now = env.ledger().timestamp();
         let elapsed = now.saturating_sub(deadline_start);
-        if elapsed < effective_timeout {
+        if elapsed <= effective_timeout {
             panic_with_error!(&env, EscrowErrorExt::DisputeTimeoutDeadlineHasNotPassedYet);
         }
 
@@ -5284,6 +5325,17 @@ impl AhjoorEscrowContract {
         );
 
         env.storage().instance().extend_ttl(INSTANCE_LIFETIME_THRESHOLD, INSTANCE_BUMP_AMOUNT);
+    }
+
+    /// Persist `escrow` under `escrow_id` and refresh its TTL.
+    fn save_escrow(env: &Env, escrow_id: u32, escrow: &Escrow) {
+        let key = DataKey::Escrow(escrow_id);
+        env.storage().persistent().set(&key, escrow);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_LIFETIME_THRESHOLD,
+            PERSISTENT_BUMP_AMOUNT,
+        );
     }
 
     /// Get escrow details
