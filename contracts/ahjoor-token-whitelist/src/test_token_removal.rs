@@ -264,10 +264,10 @@ fn test_get_tokens_by_category_returns_only_tokens_in_that_category() {
     add_token(&s, &other);
     s.client.assign_token_category(&s.admin, &other, &TokenCategory::Governance);
 
-    let mut listed = s.client.get_tokens_by_category(&TokenCategory::Stablecoin, &0, &50);
+    let listed = s.client.get_tokens_by_category(&TokenCategory::Stablecoin, &0, &50);
     assert_eq!(listed.len(), 3);
 
-    let mut all = s.client.get_whitelisted_tokens(&0, &50);
+    let all = s.client.get_whitelisted_tokens(&0, &50);
     assert_eq!(all.len(), 4);
 }
 
